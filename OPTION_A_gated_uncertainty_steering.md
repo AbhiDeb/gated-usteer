@@ -7,8 +7,8 @@
 | Owner | [Name, ID], part-time pre-PhD, BITS Pilani Goa Campus |
 | Deadline | 28 Nov 2026 (project report) |
 | Created | 21 Oct 2026 |
-| Last updated | 21 Oct 2026 |
-| Current step | Step 1 (in progress) |
+| Last updated | 24 Oct 2026 |
+| Current step | Step 1 done; Step 2 (not started) |
 | Overall status | Planning |
 
 ---
@@ -40,7 +40,7 @@ Reimplement USteer (a training-free, uncertainty-guided steering method), test w
   - Beats or matches DoLa, ITI, TruthX in most cells, with latency close to standard decoding.
   - Gains shrink with scale (Qwen3-32B: about +0.4 to +0.5, none on AQuA).
 - **The gap (visible in or around the paper):**
-  1. Appendix C states the 95% bootstrap intervals are wide relative to differences between methods, so gains are not statistically conclusive under greedy decoding.
+  1. Appendix C states the 95% bootstrap intervals are wide relative to differences between methods, so gains are not statistically conclusive under greedy decoding. **[Confirmed 23 Oct 2026, full text: CIs are about ±6 points for StrategyQA/AQuA, ±3 or less for CSQA/GSM8K; paper's own words: "precluding conclusive claims of statistical significance under greedy decoding."]** The paper separately reports (Section 4.5) that under stochastic decoding, confidence intervals are mostly non-overlapping, and it calls those gains statistically significant. **RQ1 scope note:** our reproduction should target greedy decoding specifically (where the paper itself admits the gap) and should also run a paired McNemar test, which the paper does not report and which is more appropriate than independent bootstrap CIs for same-example paired comparisons.
   2. Section 4.2 notes steering toward confidence can reinforce confidently wrong answers. Strength is tuned per dataset.
   3. Only short answers (about 35 tokens on average) on general-domain data. No medical evaluation. Code not released.
   4. USteer steers at every decoding step. A preliminary search (21 Oct 2026) found no training-free method gated by its own confidence score. **[Step 1 update, 21 Oct 2026: two gated steering papers read in full (arXiv:2608.23666, arXiv:2609.01878 GAPS); neither gates on the model's own answer-confidence on reasoning/QA. See Section 4.4 and D-007/D-008. Broader search still ongoing — not yet exhaustive.]**
@@ -63,7 +63,7 @@ Reimplement USteer (a training-free, uncertainty-guided steering method), test w
 ### 4.1 USteer mechanics (from the paper)
 
 - **Logit lens.** For layer output x^l, normalise with the model's final RMSNorm: z^l = D x^l / RMS(x^l), where D is the diagonal learned gain. Predicted token at layer l: ĉ^l = argmax_v (w_v^T z^l), where w_v are unembedding vectors.
-- **Confidence guidance score (Definition 3.1):** g(z) = (w_ĉ^T z)^2 / ||z||^2. The paper calls this a squared cosine similarity. **[VERIFY: as printed the formula omits ||w_ĉ||^2, so check whether the paper's code or text normalises w_ĉ before implementing.]**
+- **Confidence guidance score (Definition 3.1):** g(z) = (w_ĉ^T z)^2 / ||z||^2. The paper calls this a squared cosine similarity. **[VERIFIED 23 Oct 2026, full text checked: the formula as printed in the paper itself has no ||w_ĉ||^2 term and w_ĉ is not normalised anywhere in Def. 3.1 or the Lemma 3.2 gradient — this is intrinsic to the paper, not a transcription error on our side. "Squared cosine similarity" is a loose description, not literally true unless all w_v happen to be near unit-norm (unembedding rows are not normalised in standard training). Implement exactly as printed for reproduction fidelity; flag the discrepancy explicitly in the write-up.]**
 - **Gradient (Lemma 3.2, Eq. 6):** ∇_z g = (2 (w_ĉ^T z) / ||z||^2) · (w_ĉ − ((w_ĉ^T z) / ||z||^2) z).
 - **Chain rule through RMSNorm (Eq. 7):** ∇_x g = (1/||x||) (I − x x^T / ||x||^2) D ∇_z g.
 - **Update (Eq. 8):** x ← x + α · ∇_x g / ||∇_x g||. Single step, applied at selected upper intermediate layers, at every decoding step.
@@ -93,6 +93,7 @@ Reimplement USteer (a training-free, uncertainty-guided steering method), test w
 - **Design notes:**
   - Raw g values are small (about 0.02 to 0.08 in the paper's Figure 2), so τ and any scaling must be set from the validation distribution (for example percentiles), not as absolute constants.
   - **Open design question:** gate on the layer-wise g under the logit lens, or on the final-layer softmax confidence? Decide in Step 6 and log the decision.
+  - **Candidate protocol for Step 6 (not yet run, not a decision):** (1) log g (and softmax max-prob) over a validation split, unsteered; (2) bucket by percentile and check where accuracy actually drops, rather than picking a round-number threshold; (3) set τ at that data-justified percentile of this model's own distribution on this dataset, not an absolute constant; (4) for G2, fit a smooth decreasing function (e.g. sigmoid) on the same validation data instead of a hard cutoff; (5) decide g(z) vs. softmax as the gate signal by comparing their AUROC against correctness on validation data (paper does this for g(z) alone in Appendix F). Keep this validation split disjoint from whatever test accuracy gets reported, per the leakage lesson from D-012/D-013.
   - Gating granularity: per decoding step (token level). Per-sequence gating is a possible ablation.
   - Restated motivation (see Section 4.1 clarification): plain USteer's step size is a fixed α with zero dependence on per-step confidence g. Gating introduces exactly that missing dependence — nothing more, nothing less.
 - **Closest related work on gating (read in full, Step 1, 21 Oct 2026):**
@@ -139,7 +140,7 @@ Status key: [ ] not started, [~] in progress, [x] done, [!] blocked.
 
 | # | Step | Target dates | Done when | Status |
 |---|---|---|---|---|
-| 1 | Check novelty and settle scope | 21 to 22 Oct | Fuller search for gated or adaptive steering is done. 2608.23666 is read and classified as baseline or related work only. Decision logged. | [~] |
+| 1 | Check novelty and settle scope | 21 to 24 Oct | Fuller search for gated or adaptive steering is done. 2608.23666 is read and classified as baseline or related work only. Decision logged. | [x] |
 | 2 | Environment and baselines | 22 to 27 Oct | Colab set up; models load; few-shot CoT prompts and answer extractors for GSM8K and CSQA work; standard-decoding results land near the targets in 4.3. | [ ] |
 | 3 | Implement steering | 27 Oct to 1 Nov | Logit lens, g(z), closed-form gradient, hooks done. Gradient matches autograd on a small tensor. g separates correct from incorrect (AUROC check, paper Appendix F). | [ ] |
 | 4 | Reproduce USteer | 1 to 5 Nov | Strength and layer sweep on a validation split; full runs on both models; compared with 4.3. Mismatch is documented, not hidden. | [ ] |
@@ -202,6 +203,11 @@ One row per run. Never overwrite. Record failures.
 | D-006 | 21 Oct 2026 | Gate-signal choice (layer-wise g versus softmax) left open until Step 6. | Needs data to decide. | |
 | D-007 | 21 Oct 2026 | Read arXiv:2608.23666 in full; classified as related work, not a baseline. | Gates are behavior-specific detectors on learned ITI directions, not self-confidence gating; different task (dialogue pressure robustness) from our QA accuracy focus. | |
 | D-008 | 21 Oct 2026 | Found and added arXiv:2609.01878 (GAPS) as related work; novelty claim (D-002) still holds. | GAPS is training-free and gated but gates on concept-separability statistics for a fixed target concept, not on the model's own answer confidence; different domain (toxicity/concept removal vs. reasoning QA); must cite to pre-empt a reviewer. | |
+| D-009 | 23 Oct 2026 | Confirmed from full-text read of arXiv:2609.38962 that the g(z) formula's missing ||w_ĉ||^2 term is intrinsic to the paper, not our transcription error; implement as printed. Scoped RQ1 to greedy decoding plus a McNemar test, after finding the paper claims significance under stochastic decoding (Section 4.5) but not greedy (Appendix C). | Resolves the prior [VERIFY] flag; sharpens RQ1 so we're not "reproducing" a gap the paper already partially closed under sampling. | |
+| D-010 | 23 Oct 2026 | Re-verified D-009's two claims against raw paper HTML directly (no AI-summarizer in between), to avoid building claims on a WebFetch paraphrase. Greedy-vs-stochastic significance gap is openly disclosed by the authors (including in their own NeurIPS checklist) — not claimable as "our discovery," only as a sharper follow-up test (McNemar). Validation/test overlap for α-tuning is now confirmed verbatim, not just suspected — framed as a subfield convention weakness, not misconduct. | Distinguishes "disclosed limitation we extend with a better test" from "undisclosed flaw we exposed," so RQ1's framing in the final report doesn't overclaim. | |
+| D-011 | 23 Oct 2026 | Confirmed DoLa, ITI, TruthX descriptions against their own original papers, independent of USteer's characterization. All three predate USteer and are not novelty threats. | Verifies D-002's framing ("trained, static direction" vs. our training-free, dynamic, confidence-gated approach) rather than just assuming USteer described its own baselines fairly. | |
+| D-012 | 23 Oct 2026 | Found two unread candidate papers (arXiv:2603.13366 "Latent Entropy-Aware Decoding", arXiv:2511.10292 "Adaptive Residual-Update Steering") that may be closer novelty threats than anything read so far. Step 1's "fuller search" criterion stays open until both are read and classified. | Title-matching alone has been unreliable this round (GAPS looked close by name but gated on something else) — a real read is required before either confirming or ruling out overlap. | |
+| D-013 | 24 Oct 2026 | Read both arXiv:2603.13366 (LEAD) and arXiv:2511.10292 (RUDDER) from raw source text; classified both as related work, not novelty threats. Novelty claim (D-002) holds after four related papers checked. Step 1's "fuller search" criterion is now considered satisfied. | Both are training-free and adaptively gated (closest architectural analogs found), but neither gates on the model's own answer-confidence, and neither does gradient-derived activation steering on text reasoning/QA. | |
 
 ---
 
@@ -215,13 +221,15 @@ One row per run. Never overwrite. Record failures.
 
 ## 11. Open questions
 
-- [ ] Has gated or adaptive steering using a model's own confidence been published? Partial answer (21 Oct 2026): two gated steering papers read (2608.23666, GAPS 2609.01878); neither gates on the model's own answer confidence on reasoning/QA. Novelty holds so far; broader search not yet exhaustive. (Step 1.)
-- [ ] Does the gradient formula need ||w_ĉ|| normalisation? (Step 3.)
+- [x] Has gated or adaptive steering using a model's own confidence been published? **Answer as of 24 Oct 2026, after checking four related papers (2608.23666, GAPS 2609.01878, LEAD 2603.13366, RUDDER 2511.10292): not found.** All four are either trained-direction + behavior-gated, training-free + concept-separability-gated, or training-free + alignment/entropy-gated on vision-language tasks — none gate training-free activation steering by the model's own answer-confidence on text reasoning/QA. Treat as reasonably thorough for Step 1, not exhaustive; worth a final targeted re-check closer to write-up. (Step 1.)
+- [x] Does the gradient formula need ||w_ĉ|| normalisation? **Resolved 23 Oct 2026 (D-009): no.** The missing ||w_ĉ||^2 term is intrinsic to the paper; implement as printed and flag the discrepancy in the write-up. (Step 3.)
 - [ ] Are MedQA, PubMedQA, MedMCQA sizes and licences as assumed? (Step 5.)
 - [ ] Will Llama-3.2-1B score above chance on MedQA? (Step 5.)
 - [ ] Gate on layer-wise g or final-layer softmax? (Step 6.)
 - [ ] Does the professor expect a RAG or fine-tuning comparison? (Ask when sharing the proposal.)
 - [ ] Which Colab GPU is available in practice, and what is steered-run throughput? (Step 2.)
+- [x] Are arXiv:2603.13366 ("LEAD") and arXiv:2511.10292 ("RUDDER") close enough to our proposal to count as novelty threats? **Resolved 24 Oct 2026 (D-013): no.** Both training-free and adaptively gated, but neither gates on the model's own answer-confidence (LEAD gates on token entropy for embedding-mixing + a fixed visual anchor; RUDDER gates on visual-grounding alignment, with reinforcing-when-trusted logic), and both are vision-language, not text reasoning/QA. Cite both explicitly as closest analogs.
+- [x] Does the paper's validation set (used to sweep α) overlap with its evaluation set? **Confirmed 23 Oct 2026, verbatim from raw paper text (direct read, not AI-summarized):** "We evaluate on the CSQA validation set (1,221)... the StrategyQA dev set (229)... the GSM8K test set (1,319)... the AQuA validation split (254)... The steering strength α is optimized per dataset using a validation set." No separate held-out split is described anywhere — α is tuned on the same split the final numbers are reported on, for all four datasets. Likely a known convention weakness in this subfield (training-free methods, no weight-fitting risk argued), not evidence of deception. **Action:** tune α on our own disjoint validation split, never on the set we report final accuracy on. (Step 4.)
 
 ---
 
@@ -233,6 +241,7 @@ One row per run. Never overwrite. Record failures.
 | Small models near chance on medical sets | Check baselines in Step 5; switch to MedMCQA or a larger model. |
 | Medical sets test knowledge, not reasoning | State this limit; interpret null results carefully. |
 | Cannot reproduce paper numbers | Document the mismatch; check hook placement, normalisation, and prompt format first. |
+| Paper's α is tuned on the same split its final numbers are reported on (confirmed, not just suspected — no disjoint validation set is described) | Use our own clean, disjoint validation/test split; re-tune α ourselves rather than trusting Section 4.3 targets blindly. Frame as a subfield convention weakness, not an accusation of misconduct. |
 | Competing gated or adaptive work appears | Early literature check; frame novelty narrowly. |
 | Colab disconnects or GPU unavailable | Checkpointing; pay-as-you-go fallback. |
 | Time: about five weeks, two projects | Option A first; Option B limited to its pilot. |
@@ -251,12 +260,22 @@ One row per run. Never overwrite. Record failures.
 
 ## 14. Related work and references
 
-- Liu, L., Hou, Q., Jian, Y., Pourreza, R., Ghavamzadeh, M., Memisevic, R., Qin, Y., Cai, H. Alleviating Hallucination in Reasoning Tasks with Training-Free Uncertainty-Guided Steering. arXiv:2609.38962, 2026. **(Core paper, read in full.)**
+- Liu, L., Hou, Q., Jian, Y., Pourreza, R., Ghavamzadeh, M., Memisevic, R., Qin, Y., Cai, H. Alleviating Hallucination in Reasoning Tasks with Training-Free Uncertainty-Guided Steering. arXiv:2609.38962, 2026 (NeurIPS 2026; Qualcomm AI Research, UC Santa Barbara). **(Core paper; full text independently re-checked 23 Oct 2026 — see D-009.)**
 - Tripathi, H., Neupane, S., Mitra, S., Mittal, S., Amiri Golilarz, N., Rahimi, S. Gated Activation Steering for Reducing Sycophancy and Hallucination in Medical Question Answering. arXiv:2608.23666, 2026. **(Read in full 21 Oct 2026; related work, not a baseline — see Section 4.4 and D-007.)**
 - Fereidouni, M., Haider, M. U., Sajjad, H., Siddique, A. B. GAPS: Dimension-Level Gates for Conditional Activation Steering. arXiv:2609.01878, 2026. **(Found 21 Oct 2026; training-free and gated, but different gate signal and domain — see Section 4.4 and D-008.)**
+- Su, S., Zou, X., Feng, W., Mahapatra, D., Peng, Y., Lin, M., Ge, Z. Thinking in Uncertainty: Mitigating Hallucinations in MLRMs with Latent Entropy-Aware Decoding (LEAD). arXiv:2603.13366, 2026. **(Read in full 24 Oct 2026; closest "training-free + own-uncertainty-gated" analog found, still related work not a novelty threat — see Section 4.4 and D-013.)**
+- RUDDER: Residual-Update Directed DEcoding Regulation. arXiv:2511.10292, 2026 (Aalto University; Chinese Academy of Sciences). **(Read in full 24 Oct 2026; training-free adaptive gate, but gates on visual-grounding alignment not answer-confidence — see Section 4.4 and D-013.)**
 - Chapra, S., Kumar, D., Mandal, M., Sinha, Y. The Complexity Ceiling Benchmark. CTB@ICML 2026. **(Used for Option B; possible later extension for Option A.)**
 - Chang, T. A., Arnett, C., et al. Global PIQA. arXiv:2510.24081. **(Not central; possible later multilingual robustness check.)**
-- Baselines named in the USteer paper: DoLa (Chuang et al.), ITI (Li et al.), TruthX (Zhang et al.).
+- Baselines named in the USteer paper, confirmed 23 Oct 2026 against their own original papers (not just USteer's characterization):
+  - Chuang, Y.-S., Xie, Y., Luo, H., Kim, Y., Glass, J., He, P. DoLa: Decoding by Contrasting Layers Improves Factuality in Large Language Models. arXiv:2309.03883, ICLR 2024. Contrastive decoding — contrasts final-layer logits against an early-exit layer's logits. No steering vector, no learned direction, nothing training-free vs. not to debate — it never touches hidden states, only the final logit distribution.
+  - Li, K., Patel, O., Viégas, F., Pfister, H., Wattenberg, M. Inference-Time Intervention: Eliciting Truthful Answers from a Language Model. arXiv:2306.03341, NeurIPS 2023. Learns one fixed "truthful" direction from a few hundred labeled contrastive examples, applied to a small set of attention heads, same vector added at every decoding step regardless of context.
+  - Zhang, S., Yu, T., Feng, Y. TruthX: Alleviating Hallucinations by Editing Large Language Models in Truthful Space. arXiv:2402.17811, ACL 2024. Autoencoder splits representations into semantic/truthful latent spaces; contrastive learning finds one truthful editing direction; edits all hidden layers (not just attention), still a single static learned vector.
+  - **Net read:** all three predate USteer (2023–2024) and are not novelty threats — they're exactly the "trained, static-direction" category USteer (and our gating proposal) are positioned against. Confirms, rather than just assumes, D-002's framing.
+- **Candidates found 23 Oct 2026, read in full 24 Oct 2026 from raw source text — the two closest novelty-adjacent papers found so far:**
+  - **arXiv:2603.13366, LEAD ("Latent Entropy-Aware Decoding")**, Su, Zou, Feng, Mahapatra, Peng, Lin, Ge (Monash, Northeastern, Khalifa, Cornell, Minnesota). Training-free, plug-and-play decoding strategy for multimodal large reasoning models (MLRMs). Genuinely gated by the model's own token-level entropy with a *dynamically tracked* threshold (not fixed) — under high entropy it swaps the discrete one-hot next-token embedding for a probability-weighted mixture of all token embeddings, and injects a visual-anchor vector. **Classification: related work, closest found for "training-free + gated by own uncertainty," but not a novelty threat** — the injected vector is a fixed, pre-computed average of special vision-token embeddings (not a gradient-derived direction), the intervention is embedding-mixing rather than activation steering, and the domain is vision-language hallucination, not text reasoning/QA.
+  - **arXiv:2511.10292, RUDDER ("Residual-Update Directed DEcoding Regulation")**, incl. authors from Aalto University and Chinese Academy of Sciences. Training-free; injects a per-sample "CARD" vector (extracted from the model's own prefill residual-stream activations, not learned offline) into hidden states during decoding for vision-language models, modulated by an adaptive "Beta Gate." **Classification: related work, not a novelty threat** — the gate signal is s_t = cos(hidden state, CARD vector), i.e. *visual-grounding alignment*, not the model's own answer-confidence; the gating logic also runs opposite to our hypothesis (RUDDER reinforces steering *more* when already aligned/trusted, backs off when not, vs. our "steer more when uncertain"); domain is vision-language object hallucination, not text reasoning.
+  - **Net effect on novelty (D-002):** holds after four related papers checked (2608.23666, GAPS, LEAD, RUDDER). No paper found yet that is training-free, gates specifically on the model's own answer-confidence (via logit lens or equivalent), and applies to text reasoning/QA. LEAD and RUDDER should both be cited explicitly as the closest architectural analogs (training-free + adaptive per-token gating), to pre-empt a reviewer raising either.
 
 ---
 
@@ -275,3 +294,8 @@ One row per run. Never overwrite. Record failures.
 | 21 Oct 2026 | Document created from planning discussion. Status: planning. |
 | 21 Oct 2026 | Step 1: read arXiv:2608.23666 in full, classified as related work (D-007). Found and read arXiv:2609.01878 (GAPS), added as related work (D-008). Updated Sections 2, 4.4, 9, 11, 14. Novelty claim D-002 holds so far; broader literature search still open. |
 | 23 Oct 2026 | Clarified in Section 4.1/4.4 that USteer's α is a fixed scalar (no per-step dependence on confidence g) — gradient gives direction only, magnitude is discarded by normalization. Sharpens the stated motivation for gated USteer. |
+| 23 Oct 2026 | Independently re-read core USteer paper (arXiv:2609.38962) full text. Confirmed g(z)'s missing ||w_ĉ||^2 term is intrinsic to the paper (D-009). Confirmed Appendix C greedy-decoding significance gap and found new detail: Section 4.5 claims significance under stochastic decoding — scoped RQ1 to greedy decoding plus a McNemar test. Added open question and risk about possible validation/test-set overlap for α tuning. |
+| 23 Oct 2026 | Re-verified the two findings above against the raw paper HTML directly (D-010): greedy-vs-stochastic gap is openly disclosed by the authors, not an undisclosed flaw; validation/test overlap is now confirmed verbatim rather than suspected. Reframed both to avoid overclaiming in the eventual report. |
+| 23 Oct 2026 | Confirmed DoLa/ITI/TruthX baseline descriptions against their original papers (D-011); not novelty threats, all predate USteer. Found two unread candidate papers that may be closer novelty threats (D-012); Step 1's "fuller search" stays open until they're read. Updated Sections 9, 11, 14. |
+| 24 Oct 2026 | Read arXiv:2603.13366 (LEAD) and arXiv:2511.10292 (RUDDER) from raw source text; both classified as related work, not novelty threats (D-013). Novelty claim D-002 holds after four related papers checked. Step 1 marked done; moving to Step 2 (environment and baselines). Updated Sections 4.4, 9, 11, 14 and header status. |
+| 24 Oct 2026 | Added a candidate (not yet run) protocol for choosing the gate threshold τ and the gate signal in Step 6, to Section 4.4 — percentile-based τ on a disjoint validation split, AUROC comparison for signal choice. General explanations (McNemar's test, forward-hook mechanics) discussed but intentionally not logged — not project-specific decisions or findings. |
